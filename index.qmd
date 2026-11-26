@@ -1,0 +1,218 @@
+---
+title: "Trabalho 2 - PVD"
+format: dashboard
+---
+
+# {.sidebar}
+
+```{ojs}
+//| output: false
+raw = FileAttachment("dados.csv").csv({typed: true})
+```
+```{ojs}
+//| output: false
+apps = ["bomba", "compressor", "esteira", "ventilador"]
+```
+```{ojs}
+//| output: false
+nMotores = String(new Set(dados.map(d => d.codigo_motor)).size)
+```
+```{ojs}
+//| output: false
+cargaMedia = (d3.mean(dados, d => d.carga) * 100).toFixed(1).replace(".", ",")
+```
+```{ojs}
+//| output: false
+pctAlerta = (d3.mean(dados, d => d.vibracao_rms_mm_s > 2.8) * 100).toFixed(1).replace(".", ",")
+```
+```{ojs}
+//| output: false
+corIE = ["#9c6b4e", "#6cc5b0"]
+
+```
+```{ojs}
+//| output: false
+dias = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
+```
+```{ojs}
+//| output: false
+corApp = ["#4269d0", "#e15759", "#efb118", "#3ca951"]
+```
+```{ojs}
+//| output: false
+passo = Math.ceil(dados.length / 1000)
+```
+```{ojs}
+//| output: false
+amostra = dados.filter((d,i) => i % passo === 0)
+```
+```{ojs}
+//| output: false
+faixas = d3.rollups(
+    dados,
+    v => ({n: v.length, media: d3.mean(v, d => d.vibracao_rms_mm_s)}),
+    d => Math.floor(d.horas_desde_manutencao / 250) * 250 + 125
+  )
+  .map(([h, s]) => ({h, ...s}))
+  .filter(f => f.n >= 25)
+  .sort((a, b) => a.h - b.h)
+```
+```{ojs}
+viewof filtroApp = Inputs.checkbox(["bomba", "compressor", "esteira", "ventilador"], { label: "Aplicações", value: ["bomba", "compressor", "esteira", "ventilador"] })
+
+viewof inicio = Inputs.date({ label: "Data inicial", value: new Date("2024-01-01"), min: new Date("2024-01-01"), max: new Date("2025-12-31") })
+viewof fim = Inputs.date({ label: "Data final", value: new Date("2025-12-31"), min: new Date("2024-01-01"), max: new Date("2025-12-31") })
+```
+```{ojs}
+//| output: false
+dados = raw.filter(d => d.data >= inicio && d.data <= fim && filtroApp.includes(d.aplicacao))
+```
+
+
+
+# Visao Geral
+   
+
+## Row {height=25%}
+
+::: {.valuebox icon="gear" color="primary"}
+Motores monitorados
+
+${nMotores}
+:::
+
+::: {.valuebox icon="speedometer2" color="info"}
+Carga média dos motores ligados
+
+${cargaMedia}%
+:::
+
+::: {.valuebox icon="exclamation-triangle" color="warning"}
+Amostras em alerta ou dano (vibração > 2,8 mm/s)
+
+${pctAlerta}%
+:::
+
+## 
+```{ojs}
+//| title: Estatísticas por aplicação
+resumo = d3.rollups(dados, v => ({
+  "Amostras": v.length,
+  "Motores": new Set(v.map(d => d.codigo_motor)).size,
+  "Carga (%)": d3.mean(v, d => d.carga) * 100,
+  "Vibração (mm/s)": d3.mean(v, d => d.vibracao_rms_mm_s),
+  "Temp. mancal (°C)": d3.mean(v, d => d.temperatura_mancal_c),
+  "Temp. ambiente (°C)": d3.mean(v, d => d.temperatura_ambiente_c),
+  "Ruído (dB)": d3.mean(v, d => d.ruido_db),
+  "Horas desde manut. (h)": d3.mean(v, d => d.horas_desde_manutencao)
+}), d => d.aplicacao).map(([app, s]) => ({"Aplicação": app, ...s}))
+
+num = x => x.toLocaleString("pt-BR", {maximumFractionDigits: 1})
+
+Inputs.table(resumo, {format: Object.fromEntries(Object.keys(resumo[0] ?? {}).map(k => [k, num])), layout: "auto"})
+
+```
+
+
+
+
+# P1 · Manutenção
+
+## Row { height=50%}
+
+```{ojs}
+//| title: Vibração média mensal por aplicação
+    Plot.plot({
+        
+        y: {label: "Vibração RMS média (mm/s)", grid: true},
+        x: {label: "Mês", grid: true},
+        color: {domain: apps, range: corApp, legend: true},  
+        marks: [ 
+            Plot.ruleX([new Date("2025-01-01")], {stroke: "gray", strokeDasharray: "4,4"}),
+            Plot.lineY(dados, Plot.groupX({y: "mean"}, {x: "mes", y: "vibracao_rms_mm_s", stroke: "aplicacao"}))
+            
+        ]
+    })
+```
+
+```{ojs}
+//| title: Horas desde a última manutenção (média mensal)
+    Plot.plot({
+        
+        y: {label: "Horas desde a última manutenção (h)", grid: true},
+        x: {label: "Mês", grid: true},
+        color: {domain: apps, range: corApp, legend: true},  
+        marks: [ 
+            Plot.ruleX([new Date("2025-01-01")], {stroke: "gray", strokeDasharray: "4,4"}),
+            Plot.lineY(dados, Plot.groupX({y: "mean"}, {x: "mes", y: "horas_desde_manutencao", stroke: "aplicacao"}))
+            
+        ]
+    })
+```
+## Row { height=50%}
+```{ojs}
+//| title: Vibração média por hora desde a manutenção
+    Plot.plot({
+        
+        y: {label: "Vibração RMS(mm/s)", grid: true},
+        x: {label: "Horas desde a manutenção (h)", tickFormat: d => d.toLocaleString("pt-BR")},
+        color: {domain: apps, range: corApp, legend: true},  
+        marks: [
+  Plot.dot(amostra, {x: "horas_desde_manutencao", y: "vibracao_rms_mm_s", fill: "aplicacao", r: 2, fillOpacity: 0.3}),
+  Plot.ruleY([2.8], {stroke: "orange", strokeDasharray: "4,4"}),
+  Plot.ruleY([7.1], {stroke: "darkred", strokeDasharray: "4,4"}),
+  Plot.line(faixas, {x: "h", y: "media", stroke: "black", strokeWidth: 2}),
+  Plot.dot(faixas, {x: "h", y: "media", fill: "black", r: 3})
+]
+    })
+```
+
+
+
+
+
+# P2 · Rendimento
+
+## Row
+```{ojs}
+//| title: Comparação de temperatura entre motores IE2 e IE3
+Plot.plot({
+  fx: {label: "Aplicação"},
+  x: {axis: null},
+  y: {label: "Temperatura média do mancal (°C)", grid: true},
+  color: {domain: ["IE2", "IE3"], range: corIE, legend: true},
+  marks: [
+    Plot.barY(dados, Plot.groupX({y: "mean"}, {fx: "aplicacao", x: "linha_rendimento", y: "temperatura_mancal_c", fill: "linha_rendimento", opacity: 0.7})),
+    Plot.ruleY([0])
+  ]
+})
+```
+
+# P3 · Operação
+
+## Row
+```{ojs}
+//| title: Amostras por hora e dia da semana (indicador de motores ligados)
+Plot.plot({
+  x: {label: "Hora do dia", tickFormat: d => d + "h"},
+  y: {label: "Dia da semana", tickFormat: d => dias[d]},
+  color: {scheme: "blues", legend: true, label: "Amostras"},
+  marks: [
+    Plot.cell(dados, Plot.group({fill: "count"}, {x: "hora", y: "dia_semana"}))
+  ]
+})
+```
+
+## Row
+```{ojs}
+//| title: Comparação de carga média por hora entre dias úteis e finais de semana
+Plot.plot({
+  x: {label: "Hora do dia", tickFormat: d => d + "h"},
+  y: {label: "Carga média (% da potência nominal)", grid: true, percent: true},
+  color: {domain: ["dia útil", "fim de semana"], range: ["#4269d0", "#ff8ab7"], legend: true},
+  marks: [
+    Plot.lineY(dados, Plot.groupX({y: "mean"}, {x: "hora", y: "carga", stroke: d => d.dia_semana >= 5 ? "fim de semana" : "dia útil"}))
+  ]
+})
+```
+
